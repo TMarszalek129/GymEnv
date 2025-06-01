@@ -1,4 +1,5 @@
 from enum import Enum
+from collections import deque
 import numpy as np
 import pygame
 import gymnasium as gym
@@ -78,38 +79,99 @@ class GridEnv(gym.Env):
 
         return indices
 
+    def _check_placing(self, start, end):
+
+        visited = set()
+        queue = deque([(start, [start])])  # (current_pos, path)
+
+        while queue:
+            current, path = queue.popleft()
+            if tuple(current) == tuple(end):
+                return path
+
+            for move in self._action_to_direction.values():
+                neighbor = tuple(np.clip(np.array(current) + move, 0, self.size - 1))
+                if neighbor in visited or neighbor in self.walls or neighbor:
+                    continue
+                visited.add(neighbor)
+                queue.append((neighbor, path + [neighbor]))
+
+        return None  # No path found
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.available_pos = [(i,j) for j in range(self.size) for i in range(self.size)]
-        self._agent_location = self.np_random.integers(0, self.size, size=2, dtype=int)
-        self._target_location = self._agent_location
+        reset = False
+        correct_match = False
 
-        while not self._manhattan_distance(self._target_location, self._agent_location, 5, 10):
-            self._target_location = self.np_random.integers(
-                0, self.size, size=2, dtype=int
-            )
+        while not correct_match:
+            self.available_pos = [(i,j) for j in range(self.size) for i in range(self.size)]
+            self._agent_location = self.np_random.integers(0, self.size, size=2, dtype=int)
+            self._target_location = self._agent_location
 
-        self.available_pos.remove(tuple(self._agent_location))
-        self.available_pos.remove(tuple(self._target_location))
+            # SETTING TARGET AND AGENT
+            tries = 0
+            while not self._manhattan_distance(self._target_location, self._agent_location, 5, 10):
+                tries += 1
+                self._target_location = self.np_random.integers(
+                    0, self.size, size=2, dtype=int
+                )
+                if tries == 100:
+                    reset = True
 
-        while(len(self.walls) < 5):
-            wall_pos = tuple(self.np_random.integers(0, self.size, size=2, dtype=int))
-            if wall_pos in self.available_pos:
-                self.walls.append(wall_pos)
-                self.available_pos.remove(wall_pos)
+            self.available_pos.remove(tuple(self._agent_location))
+            self.available_pos.remove(tuple(self._target_location))
 
-        num_bad = np.random.randint(3, 6)
-        while (len(self.bad_tiles) < num_bad):
-            bad_pos = tuple(self.np_random.integers(0, self.size, size=2, dtype=int))
-            if bad_pos in self.available_pos:
-                self.bad_tiles.append(bad_pos)
-                self.available_pos.remove(bad_pos)
+            # SETTING WALLS
+            tries = 0
+            while(len(self.walls) < 5 and not reset):
+                tries += 1
+                wall_pos = tuple(self.np_random.integers(0, self.size, size=2, dtype=int))
+                if not self.wall_correct and self._manhattan_distance(wall_pos, self._agent_location, 2, 5)\
+                    and self._manhattan_distance(wall_pos, self._target_location, 2, 5):
+                    self.walls.append(wall_pos)
+                    self.available_pos.remove(wall_pos)
+                    self.wall_correct = True
+                elif not self.wall_correct:
+                    continue
+                elif wall_pos in self.available_pos and not list(set(self._get_neighbors(wall_pos)) & set(self.walls)) :
+                    self.walls.append(wall_pos)
+                    self.available_pos.remove(wall_pos)
+                if tries == 100:
+                    reset = True
 
-        while(len(self.special_tiles) < 2):
-            special_pos = tuple(self.np_random.integers(0, self.size, size=2, dtype=int))
-            if special_pos in self.available_pos:
-                self.special_tiles.append(special_pos)
-                self.available_pos.remove(special_pos)
+            # SETTING BAD_TILES
+            tries = 0
+            num_bad = np.random.randint(3, 6)
+            while (len(self.bad_tiles) < num_bad and not reset):
+                tries += 1
+                bad_pos = tuple(self.np_random.integers(0, self.size, size=2, dtype=int))
+                if not self.bad_correct and self._manhattan_distance(bad_pos, self._agent_location, 2, 5)\
+                    and self._manhattan_distance(bad_pos, self._target_location, 2, 5):
+                    self.bad_tiles.append(bad_pos)
+                    self.available_pos.remove(bad_pos)
+                    self.bad_correct = True
+                elif not self.bad_correct:
+                    continue
+                elif bad_pos in self.available_pos and not list(set(self._get_neighbors(bad_pos)) & set(self.bad_tiles)) :
+                    self.bad_tiles.append(bad_pos)
+                    self.available_pos.remove(bad_pos)
+                if tries == 100:
+                    reset = True
+
+            # SETTING SPECIALS
+            tries = 0
+            while(len(self.special_tiles) < 2 and not reset):
+                tries += 1
+                special_pos = tuple(self.np_random.integers(0, self.size, size=2, dtype=int))
+                if special_pos in self.available_pos:
+                    self.special_tiles.append(special_pos)
+                    self.available_pos.remove(special_pos)
+                if tries == 100:
+                    reset = True
+
+            if not reset:
+                correct_match = True
+
 
         observation = self._get_obs()
         info = self._get_info()
