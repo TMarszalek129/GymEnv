@@ -6,6 +6,9 @@ import gymnasium as gym
 from gymnasium import spaces
 from sklearn.metrics.pairwise import manhattan_distances
 
+from qlearner import QLearner
+from train_agent import train_agent
+
 class Actions(Enum):
     RIGHT = 0
     UP = 1
@@ -79,7 +82,10 @@ class GridEnv(gym.Env):
 
         return indices
 
-    def _check_placing(self, start, end):
+    def _check_placing(self):
+
+        start = self._agent_location
+        end = self._target_location
 
         visited = set()
         queue = deque([(start, [start])])  # (current_pos, path)
@@ -91,7 +97,7 @@ class GridEnv(gym.Env):
 
             for move in self._action_to_direction.values():
                 neighbor = tuple(np.clip(np.array(current) + move, 0, self.size - 1))
-                if neighbor in visited or neighbor in self.walls or neighbor:
+                if neighbor in visited or neighbor in self.walls or neighbor in self.bad_tiles:
                     continue
                 visited.add(neighbor)
                 queue.append((neighbor, path + [neighbor]))
@@ -102,9 +108,14 @@ class GridEnv(gym.Env):
         super().reset(seed=seed)
         reset = False
         correct_match = False
+        iter = 0
 
         while not correct_match:
+            reset = False
+            iter += 1
+
             self.available_pos = [(i,j) for j in range(self.size) for i in range(self.size)]
+            print("Iteration ", iter, "Available: ", self.available_pos)
             self._agent_location = self.np_random.integers(0, self.size, size=2, dtype=int)
             self._target_location = self._agent_location
 
@@ -117,17 +128,19 @@ class GridEnv(gym.Env):
                 )
                 if tries == 100:
                     reset = True
-
-            self.available_pos.remove(tuple(self._agent_location))
-            self.available_pos.remove(tuple(self._target_location))
+                    break
+            if not reset:
+                self.available_pos.remove(tuple(self._agent_location))
+                self.available_pos.remove(tuple(self._target_location))
 
             # SETTING WALLS
             tries = 0
             while(len(self.walls) < 5 and not reset):
                 tries += 1
                 wall_pos = tuple(self.np_random.integers(0, self.size, size=2, dtype=int))
-                if not self.wall_correct and self._manhattan_distance(wall_pos, self._agent_location, 2, 5)\
-                    and self._manhattan_distance(wall_pos, self._target_location, 2, 5):
+                if wall_pos in self.available_pos and not self.wall_correct \
+                        and self._manhattan_distance(wall_pos, self._agent_location, 2, 5) \
+                        and self._manhattan_distance(wall_pos, self._target_location, 2, 5):
                     self.walls.append(wall_pos)
                     self.available_pos.remove(wall_pos)
                     self.wall_correct = True
@@ -138,6 +151,7 @@ class GridEnv(gym.Env):
                     self.available_pos.remove(wall_pos)
                 if tries == 100:
                     reset = True
+                    break
 
             # SETTING BAD_TILES
             tries = 0
@@ -145,8 +159,10 @@ class GridEnv(gym.Env):
             while (len(self.bad_tiles) < num_bad and not reset):
                 tries += 1
                 bad_pos = tuple(self.np_random.integers(0, self.size, size=2, dtype=int))
-                if not self.bad_correct and self._manhattan_distance(bad_pos, self._agent_location, 2, 5)\
-                    and self._manhattan_distance(bad_pos, self._target_location, 2, 5):
+
+                if bad_pos in self.available_pos and not self.bad_correct \
+                        and self._manhattan_distance(bad_pos, self._agent_location, 2, 5)\
+                        and self._manhattan_distance(bad_pos, self._target_location, 2, 5):
                     self.bad_tiles.append(bad_pos)
                     self.available_pos.remove(bad_pos)
                     self.bad_correct = True
@@ -157,6 +173,7 @@ class GridEnv(gym.Env):
                     self.available_pos.remove(bad_pos)
                 if tries == 100:
                     reset = True
+                    break
 
             # SETTING SPECIALS
             tries = 0
@@ -168,9 +185,13 @@ class GridEnv(gym.Env):
                     self.available_pos.remove(special_pos)
                 if tries == 100:
                     reset = True
+                    break
 
             if not reset:
-                correct_match = True
+                if self._check_placing() is not None:
+                    correct_match = True
+                else:
+                    reset = True
 
 
         observation = self._get_obs()
@@ -256,7 +277,7 @@ class GridEnv(gym.Env):
             ),
         )
         # Now we draw the agent
-        pygame.draw.circle(
+        circle = pygame.draw.circle(
             canvas,
             (0, 0, 255),
             (self._agent_location + 0.5) * pix_square_size,
@@ -346,6 +367,23 @@ class GridEnv(gym.Env):
 
 env = GridEnv(render_mode="human")
 obs, _ = env.reset()
+
+#hyperparameters
+max_epsilon = 1
+min_epsilon = 0.1
+decay = 0.1
+
+train_episodes = 2000
+test_episodes = 100
+max_steps = 100
+
+alpha = 0.8
+discount_factor = 0.7
+
+n_bins = 8
+
+# agent = QLearner(env, n_bins, alpha, discount_factor, max_epsilon, min_epsilon, decay, adaptive_mode=True, adaptive_binning=True)
+# training_rewards, epsilons, train_episodes, states = train_agent(agent, max_steps, diff=0.001)
 
 done = False
 while not done:
