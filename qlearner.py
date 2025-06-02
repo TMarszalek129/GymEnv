@@ -24,10 +24,15 @@ class QLearner:
                     low, high = -1, 1
                 self.bins.append(np.linspace(low, high, self.n_bins-1))
 
-        self.state_shape = tuple([self.n_bins] * self.env.observation_space.shape[0])
-        self.action_shape = self.env.action_space.n
-        self.Q = np.zeros(self.state_shape + (self.action_shape,))
+        # self.state_shape = tuple([self.n_bins] * self.env.observation_space.shape[0])
+        # self.action_shape = self.env.action_space.n
+        # self.Q = np.zeros(self.state_shape + (self.action_shape,))
+        self.Q = defaultdict(lambda: np.zeros(env.action_space.n))
 
+    def get_state(self, obs):
+        agent = tuple(obs['agent'])
+        target = tuple(obs['target'])
+        return agent + target
     def discretize_state(self, obs):
         state = []
         for i in range(len(obs)):
@@ -44,9 +49,11 @@ class QLearner:
         return action
 
     def update_Q(self, state, new_state, action, reward):
-        self.visited[state] += 1
-        if self.adaptive_mode:
-            self.alpha = 60 / (59 + self.visited[state])
-
-        self.Q[state][action] += self.alpha * (reward + self.discount_factor * np.max(self.Q[new_state]) - self.Q[state][action])
+        self.Q[state][action] += self.alpha * (reward +
+                                               self.discount_factor * self.Q[new_state][np.argmax(self.Q[new_state])] - self.Q[state][action])
+        # self.visited[state] += 1
+        # if self.adaptive_mode:
+        #     self.alpha = 60 / (59 + self.visited[state])
+        #
+        # self.Q[state][action] += self.alpha * (reward + self.discount_factor * np.max(self.Q[new_state]) - self.Q[state][action])
 

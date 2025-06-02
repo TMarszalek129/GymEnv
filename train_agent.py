@@ -9,18 +9,20 @@ def train_agent(agent, max_steps, diff):
     while agent.epsilon - agent.epsilon_min > diff:
         episode += 1
 
-        state, info = agent.env.reset()
-        for i in range(8):
-            states[i].append(state[i])
-        state = agent.discretize_state(state)
+        obs, info = agent.env.reset()
+        state = agent.get_state(obs)
+        # for i in range(8):
+        #     states[i].append(state) # deleted state[i]
+        # # state = agent.discretize_state(state)
         total_training_rewards = 0
 
         for step in range(max_steps):
             action = agent.choose_action(state)
-            new_state, reward, terminated, truncated, info = agent.env.step(action)
-            for i in range(8):
-                states[i].append(state[i])
-            new_state = agent.discretize_state(new_state)
+            new_obs, reward, terminated, truncated, info, special_event = agent.env.step(action)
+            new_state = agent.get_state(new_obs)
+            # for i in range(8):
+            #     states[i].append(state) # deleted state[i]
+            # # new_state = agent.discretize_state(new_state)
 
             agent.update_Q(state, new_state, action, reward)
             total_training_rewards += reward

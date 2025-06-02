@@ -1,13 +1,16 @@
 from enum import Enum
-from collections import deque
+from collections import deque, defaultdict
+import random
 import numpy as np
+import matplotlib.pyplot as plt
+# matplotlib.use('TkAgg')
 import pygame
 import gymnasium as gym
 from gymnasium import spaces
 from sklearn.metrics.pairwise import manhattan_distances
 
-from qlearner import QLearner
 from train_agent import train_agent
+from qlearner import QLearner
 
 class Actions(Enum):
     RIGHT = 0
@@ -88,7 +91,7 @@ class GridEnv(gym.Env):
         end = self._target_location
 
         visited = set()
-        queue = deque([(start, [start])])  # (current_pos, path)
+        queue = deque([(start, [start])])  
 
         while queue:
             current, path = queue.popleft()
@@ -102,7 +105,7 @@ class GridEnv(gym.Env):
                 visited.add(neighbor)
                 queue.append((neighbor, path + [neighbor]))
 
-        return None  # No path found
+        return None  
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -115,7 +118,7 @@ class GridEnv(gym.Env):
             iter += 1
 
             self.available_pos = [(i,j) for j in range(self.size) for i in range(self.size)]
-            print("Iteration ", iter, "Available: ", self.available_pos)
+            # print("Iteration ", iter, "Available: ", self.available_pos)
             self._agent_location = self.np_random.integers(0, self.size, size=2, dtype=int)
             self._target_location = self._agent_location
 
@@ -365,13 +368,13 @@ class GridEnv(gym.Env):
             pygame.display.quit()
             pygame.quit()
 
-env = GridEnv(render_mode="human")
+env = GridEnv(render_mode=None)
 obs, _ = env.reset()
 
 #hyperparameters
 max_epsilon = 1
-min_epsilon = 0.1
-decay = 0.1
+min_epsilon = 0.01
+decay = 0.01
 
 train_episodes = 2000
 test_episodes = 100
@@ -382,16 +385,89 @@ discount_factor = 0.7
 
 n_bins = 8
 
-# agent = QLearner(env, n_bins, alpha, discount_factor, max_epsilon, min_epsilon, decay, adaptive_mode=True, adaptive_binning=True)
-# training_rewards, epsilons, train_episodes, states = train_agent(agent, max_steps, diff=0.001)
 
-done = False
-while not done:
-    action = env.action_space.sample()
-    obs, reward, done, truncated, info, special_event = env.step(action)
-    print(f"Action: {action}, Reward: {reward : .1f}, Done: {done}, Special event: {special_event}")
+# print(tuple(env.observation_space['agent']) + tuple(env.observation_space['target']))
 
+agent = QLearner(env, n_bins, alpha, discount_factor, max_epsilon, min_epsilon, decay, adaptive_mode=True, adaptive_binning=True)
+training_rewards, epsilons, train_episodes, states = train_agent(agent, max_steps, diff=0.001)
+
+# done = False
+# # while not done:
+# #     action = env.action_space.sample()
+# #     obs, reward, done, truncated, info, special_event = env.step(action)
+# #     print(f"Action: {action}, Reward: {reward : .1f}, Done: {done}, Special event: {special_event}")
+# #
+# #
+# env.close()
+
+# def get_state(obs):
+#     """Convert observation dictionary to a hashable state."""
+#     agent = tuple(obs['agent'])
+#     target = tuple(obs['target'])
+#     return agent + target  # Concatenate tuples
+#
+#
+# # ε-greedy policy
+# def choose_action(state):
+#     if random.random() < train_episodes:
+#         return env.action_space.sample()
+#     return np.argmax(Q[state])
+#
+#
+# # Training loop
+# for ep in range(train_episodes):
+#     obs, _ = env.reset()
+#     state = get_state(obs)
+#     done = False
+#     total_reward = 0
+#
+#     while not done:
+#         action = choose_action(state)
+#         next_obs, reward, terminated, _, _, _ = env.step(action)
+#         next_state = get_state(next_obs)
+#         best_next_action = np.argmax(Q[next_state])
+#
+#         # Q-learning update
+#         Q[state][action] += alpha * (reward + discount_factor * Q[next_state][best_next_action] - Q[state][action])
+#
+#         state = next_state
+#         total_reward += reward
+#         done = terminated
+#
+#     if ep % 100 == 0:
+#         print(f"Episode {ep}, Total reward: {total_reward:.2f}")
 
 env.close()
 
-        
+visualize = False
+if visualize:
+    #Visualizing results and total reward over all episodes
+    x = range(train_episodes)
+    plt.plot(x, training_rewards)
+    plt.xlabel('Episode')
+    plt.ylabel('Training total reward')
+    plt.title('Total rewards over all episodes in training')
+    plt.show()
+
+    #Visualizing the epsilons over all episodes
+    plt.plot(epsilons)
+    plt.xlabel('Episode')
+    plt.ylabel('Epsilon')
+    plt.title("Epsilon for episode")
+    plt.show()
+
+    #Visualizing results and total reward over all episodes with moving_average
+    def moving_average(data, window_size=10):
+        return np.convolve(data, np.ones(window_size)/window_size, mode='same')
+
+    window_size = 10
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(moving_average(training_rewards, window_size=window_size), color='blue', label='Smoothed (10 ep MA)')
+    plt.title("Learning Curve: Total Reward per Episode (with average window = {})".format(window_size))
+    plt.ylabel("Total Reward")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
