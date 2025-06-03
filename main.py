@@ -20,7 +20,7 @@ class Actions(Enum):
 
 class GridEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
-    def __init__(self, render_mode=None, size=5):
+    def __init__(self, render_mode=None, size=5, min_m=5, max_m=10):
         self.window_size = 512
         self.size = size
         self.observation_space = spaces.Dict(
@@ -53,6 +53,9 @@ class GridEnv(gym.Env):
 
         self.wall_correct = False
         self.bad_correct = False
+
+        self.min_moves_to_win = min_m
+        self.max_moves_to_win = max_m
 
     def _get_obs(self):
         return {"agent": self._agent_location, "target": self._target_location}
@@ -116,6 +119,12 @@ class GridEnv(gym.Env):
         while not correct_match:
             reset = False
             iter += 1
+            self.walls = []
+            self.bad_tiles = []
+            self.special_tiles = []
+
+            if iter > 100:
+                raise Exception("No suitable placing variant found")
 
             self.available_pos = [(i,j) for j in range(self.size) for i in range(self.size)]
             # print("Iteration ", iter, "Available: ", self.available_pos)
@@ -124,14 +133,17 @@ class GridEnv(gym.Env):
 
             # SETTING TARGET AND AGENT
             tries = 0
-            while not self._manhattan_distance(self._target_location, self._agent_location, 5, 10):
+            while not self._manhattan_distance(self._target_location, self._agent_location, self.min_moves_to_win,
+                                               self.max_moves_to_win):
                 tries += 1
-                self._target_location = self.np_random.integers(
-                    0, self.size, size=2, dtype=int
-                )
                 if tries == 100:
                     reset = True
                     break
+
+                self._target_location = self.np_random.integers(
+                    0, self.size, size=2, dtype=int
+                )
+
             if not reset:
                 self.available_pos.remove(tuple(self._agent_location))
                 self.available_pos.remove(tuple(self._target_location))
@@ -140,10 +152,17 @@ class GridEnv(gym.Env):
             tries = 0
             while(len(self.walls) < 5 and not reset):
                 tries += 1
+                if tries == 100:
+                    reset = True
+                    break
+
+
                 wall_pos = tuple(self.np_random.integers(0, self.size, size=2, dtype=int))
                 if wall_pos in self.available_pos and not self.wall_correct \
-                        and self._manhattan_distance(wall_pos, self._agent_location, 2, 5) \
-                        and self._manhattan_distance(wall_pos, self._target_location, 2, 5):
+                        and self._manhattan_distance(wall_pos, self._agent_location, self.min_moves_to_win-3,
+                                                     self.min_moves_to_win) \
+                        and self._manhattan_distance(wall_pos, self._target_location, self.min_moves_to_win-3,
+                                                     self.min_moves_to_win):
                     self.walls.append(wall_pos)
                     self.available_pos.remove(wall_pos)
                     self.wall_correct = True
@@ -152,20 +171,24 @@ class GridEnv(gym.Env):
                 elif wall_pos in self.available_pos and not list(set(self._get_neighbors(wall_pos)) & set(self.walls)) :
                     self.walls.append(wall_pos)
                     self.available_pos.remove(wall_pos)
-                if tries == 100:
-                    reset = True
-                    break
+
 
             # SETTING BAD_TILES
             tries = 0
             num_bad = np.random.randint(3, 6)
             while (len(self.bad_tiles) < num_bad and not reset):
                 tries += 1
+                if tries == 100:
+                    reset = True
+                    break
+
                 bad_pos = tuple(self.np_random.integers(0, self.size, size=2, dtype=int))
 
                 if bad_pos in self.available_pos and not self.bad_correct \
-                        and self._manhattan_distance(bad_pos, self._agent_location, 2, 5)\
-                        and self._manhattan_distance(bad_pos, self._target_location, 2, 5):
+                        and self._manhattan_distance(bad_pos, self._agent_location, self.min_moves_to_win-3,
+                                                     self.min_moves_to_win)\
+                        and self._manhattan_distance(bad_pos, self._target_location, self.min_moves_to_win-3,
+                                                     self.min_moves_to_win):
                     self.bad_tiles.append(bad_pos)
                     self.available_pos.remove(bad_pos)
                     self.bad_correct = True
@@ -174,21 +197,20 @@ class GridEnv(gym.Env):
                 elif bad_pos in self.available_pos and not list(set(self._get_neighbors(bad_pos)) & set(self.bad_tiles)) :
                     self.bad_tiles.append(bad_pos)
                     self.available_pos.remove(bad_pos)
-                if tries == 100:
-                    reset = True
-                    break
+
 
             # SETTING SPECIALS
             tries = 0
             while(len(self.special_tiles) < 2 and not reset):
                 tries += 1
+                if tries == 100:
+                    reset = True
+                    break
                 special_pos = tuple(self.np_random.integers(0, self.size, size=2, dtype=int))
                 if special_pos in self.available_pos:
                     self.special_tiles.append(special_pos)
                     self.available_pos.remove(special_pos)
-                if tries == 100:
-                    reset = True
-                    break
+
 
             if not reset:
                 if self._check_placing() is not None:
@@ -207,6 +229,13 @@ class GridEnv(gym.Env):
 
     def step(self, action):
         direction = self._action_to_direction[action]
+        special_event = ""
+
+        random_v = np.random.rand()
+        if  0.9 < random_v < 1.0 and tuple(self._agent_location + direction) not in self.walls:
+            direction = 2 * direction
+            special_event += " Double move "
+
         possible_move = np.clip(
             self._agent_location + direction, 0, self.size - 1
         )
@@ -214,27 +243,27 @@ class GridEnv(gym.Env):
             self._agent_location = possible_move
 
         terminated = np.array_equal(self._agent_location, self._target_location)
-        special_event = ""
+
         if tuple(self._agent_location) in self.bad_tiles:
             self.reward -= 10
             terminated = True
-            special_event = "Bad tile (-10)"
+            special_event += " Bad tile (-10) "
 
         elif tuple(self._agent_location) == tuple(self.special_tiles[0]):
             if not self.special_reward_a:
                 self.reward += 10
                 self.special_reward_a = True
-                special_event = "Reward A (+10)"
+                special_event += " Reward A (+10) "
             else:
-                special_event = "Reward A (reward was used)"
+                special_event += " Reward A (reward was used) "
         elif tuple(self._agent_location) == tuple(self.special_tiles[1]):
             if not self.special_reward_b:
                 self.reward += 10
                 self.special_reward_b = True
                 terminated = True
-                special_event = "Reward B (+10)"
+                special_event += " Reward B (+10) "
             else:
-                special_event = "Reward B (reward was used)"
+                special_event += " Reward B (reward was used) "
 
         if terminated:
             if tuple(self._agent_location) not in self.bad_tiles and tuple(self._agent_location) not in self.special_tiles:
@@ -368,7 +397,11 @@ class GridEnv(gym.Env):
             pygame.display.quit()
             pygame.quit()
 
-env = GridEnv(render_mode=None)
+
+# render_mode= 'human' # None for training or 'human' for visualization
+render_mode = None
+env = GridEnv(render_mode=render_mode)
+# env = GridEnv(render_mode=render_mode, min_m=11, max_m=float('inf'), size=8)
 obs, _ = env.reset()
 
 #hyperparameters
@@ -386,18 +419,19 @@ discount_factor = 0.7
 n_bins = 8
 
 
-# print(tuple(env.observation_space['agent']) + tuple(env.observation_space['target']))
 
-agent = QLearner(env, n_bins, alpha, discount_factor, max_epsilon, min_epsilon, decay, adaptive_mode=True, adaptive_binning=True)
-training_rewards, epsilons, train_episodes, states = train_agent(agent, max_steps, diff=0.001)
+if render_mode == None:
 
-# done = False
-# # while not done:
-# #     action = env.action_space.sample()
-# #     obs, reward, done, truncated, info, special_event = env.step(action)
-# #     print(f"Action: {action}, Reward: {reward : .1f}, Done: {done}, Special event: {special_event}")
-# #
-# #
+    agent = QLearner(env, n_bins, alpha, discount_factor, max_epsilon, min_epsilon, decay, adaptive_mode=True, adaptive_binning=True)
+    training_rewards, epsilons, train_episodes, states = train_agent(agent, max_steps, diff=0.001)
+elif render_mode == 'human':
+    done = False
+    while not done:
+        action = env.action_space.sample()
+        obs, reward, done, truncated, info, special_event = env.step(action)
+        print(f"Action: {action}, Reward: {reward : .1f}, Done: {done}, Special event: {special_event}")
+
+    # #
 # env.close()
 
 # def get_state(obs):
@@ -439,8 +473,8 @@ training_rewards, epsilons, train_episodes, states = train_agent(agent, max_step
 
 env.close()
 
-visualize = False
-if visualize:
+visualize = True
+if visualize and render_mode is None:
     #Visualizing results and total reward over all episodes
     x = range(train_episodes)
     plt.plot(x, training_rewards)
