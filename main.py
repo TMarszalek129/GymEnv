@@ -1,12 +1,11 @@
 from enum import Enum
 from collections import deque, defaultdict
-import random
 import numpy as np
 import matplotlib.pyplot as plt
-# matplotlib.use('TkAgg')
 import pygame
 import gymnasium as gym
 from gymnasium import spaces
+from stable_baselines3 import PPO
 from sklearn.metrics.pairwise import manhattan_distances
 
 from train_agent import train_agent
@@ -297,9 +296,8 @@ class GridEnv(gym.Env):
         canvas.fill((255, 255, 255))
         pix_square_size = (
                 self.window_size / self.size
-        )  # The size of a single grid square in pixels
+        )
 
-        # First we draw the target
         pygame.draw.rect(
             canvas,
             (255, 0, 0),
@@ -308,7 +306,6 @@ class GridEnv(gym.Env):
                 (pix_square_size, pix_square_size),
             ),
         )
-        # Now we draw the agent
         circle = pygame.draw.circle(
             canvas,
             (0, 0, 255),
@@ -361,7 +358,6 @@ class GridEnv(gym.Env):
 
         canvas.blit(text_obj_b, text_rect_b)
 
-        # Finally, add some gridlines
         for x in range(self.size + 1):
             pygame.draw.line(
                 canvas,
@@ -379,15 +375,12 @@ class GridEnv(gym.Env):
             )
 
         if self.render_mode == "human":
-            # The following line copies our drawings from `canvas` to the visible window
             self.window.blit(canvas, canvas.get_rect())
             pygame.event.pump()
             pygame.display.update()
 
-            # We need to ensure that human-rendering occurs at the predefined framerate.
-            # The following line will automatically add a delay to keep the framerate stable.
             self.clock.tick(self.metadata["render_fps"])
-        else:  # rgb_array
+        else:
             return np.transpose(
                 np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2)
             )
@@ -400,10 +393,10 @@ class GridEnv(gym.Env):
 
 # render_mode= 'human' # None for training or 'human' for visualization
 render_mode = None
-env = GridEnv(render_mode=render_mode)
-# env = GridEnv(render_mode=render_mode, min_m=11, max_m=float('inf'), size=8)
+# env = GridEnv(render_mode=render_mode)
+env = GridEnv(render_mode=render_mode, min_m=11, max_m=float('inf'), size=8)
 obs, _ = env.reset()
-
+visualize = False
 #hyperparameters
 max_epsilon = 1
 min_epsilon = 0.01
@@ -417,13 +410,29 @@ alpha = 0.8
 discount_factor = 0.7
 
 n_bins = 8
-
+algorithm = 'qlearn' # 'ppo' or 'qlearn'
 
 
 if render_mode == None:
+    if algorithm == 'qlearn':
+        agent = QLearner(env, n_bins, alpha, discount_factor, max_epsilon, min_epsilon, decay, adaptive_mode=True, adaptive_binning=True)
+        training_rewards, epsilons, train_episodes, states = train_agent(agent, max_steps, diff=0.001)
+    elif algorithm == 'ppo': # NOT ENDED
+        agent = PPO("MultiInputPolicy", env, verbose=1)
+        agent.learn(total_timesteps=25000)
+        agent.save("ppo_cartpole")
 
-    agent = QLearner(env, n_bins, alpha, discount_factor, max_epsilon, min_epsilon, decay, adaptive_mode=True, adaptive_binning=True)
-    training_rewards, epsilons, train_episodes, states = train_agent(agent, max_steps, diff=0.001)
+        del agent  # remove to demonstrate saving and loading
+
+        agent = PPO.load("ppo_cartpole")
+
+        obs = env.reset()
+        while True:
+            action, _states = agent.predict(obs)
+            obs, rewards, dones, info = env.step(action)
+            # env.render("human")
+    else:
+        pass
 elif render_mode == 'human':
     done = False
     while not done:
@@ -431,66 +440,25 @@ elif render_mode == 'human':
         obs, reward, done, truncated, info, special_event = env.step(action)
         print(f"Action: {action}, Reward: {reward : .1f}, Done: {done}, Special event: {special_event}")
 
-    # #
-# env.close()
-
-# def get_state(obs):
-#     """Convert observation dictionary to a hashable state."""
-#     agent = tuple(obs['agent'])
-#     target = tuple(obs['target'])
-#     return agent + target  # Concatenate tuples
-#
-#
-# # ε-greedy policy
-# def choose_action(state):
-#     if random.random() < train_episodes:
-#         return env.action_space.sample()
-#     return np.argmax(Q[state])
-#
-#
-# # Training loop
-# for ep in range(train_episodes):
-#     obs, _ = env.reset()
-#     state = get_state(obs)
-#     done = False
-#     total_reward = 0
-#
-#     while not done:
-#         action = choose_action(state)
-#         next_obs, reward, terminated, _, _, _ = env.step(action)
-#         next_state = get_state(next_obs)
-#         best_next_action = np.argmax(Q[next_state])
-#
-#         # Q-learning update
-#         Q[state][action] += alpha * (reward + discount_factor * Q[next_state][best_next_action] - Q[state][action])
-#
-#         state = next_state
-#         total_reward += reward
-#         done = terminated
-#
-#     if ep % 100 == 0:
-#         print(f"Episode {ep}, Total reward: {total_reward:.2f}")
-
 env.close()
 
-visualize = True
+
 if visualize and render_mode is None:
-    #Visualizing results and total reward over all episodes
     x = range(train_episodes)
     plt.plot(x, training_rewards)
     plt.xlabel('Episode')
     plt.ylabel('Training total reward')
     plt.title('Total rewards over all episodes in training')
+    plt.grid()
     plt.show()
 
-    #Visualizing the epsilons over all episodes
     plt.plot(epsilons)
     plt.xlabel('Episode')
     plt.ylabel('Epsilon')
     plt.title("Epsilon for episode")
+    plt.grid()
     plt.show()
 
-    #Visualizing results and total reward over all episodes with moving_average
     def moving_average(data, window_size=10):
         return np.convolve(data, np.ones(window_size)/window_size, mode='same')
 
@@ -501,7 +469,7 @@ if visualize and render_mode is None:
     plt.title("Learning Curve: Total Reward per Episode (with average window = {})".format(window_size))
     plt.ylabel("Total Reward")
     plt.legend()
-
+    plt.grid()
     plt.tight_layout()
     plt.show()
 

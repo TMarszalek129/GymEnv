@@ -3,3 +3,4 @@ pygame
 gymnasium
 sklearn
 matplotlib
+stable_baselines3
